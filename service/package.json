@@ -1,6 +1,6 @@
 {
   "name": "dg-cart-compatibility-service",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "commercetools Connect service — UC3 Cart Compatibility Extension for Nescafé Dolce Gusto",
   "main": "index.js",
   "scripts": {
@@ -12,11 +12,11 @@
     "connector:pre-undeploy": "node connector/pre-undeploy.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18"
   },
   "dependencies": {
     "@commercetools/platform-sdk": "^7.15.0",
     "@commercetools/sdk-client-v2": "^3.3.2",
-    "express": "^4.19.2"
+    "express": "^4.21.2"
   }
 }
