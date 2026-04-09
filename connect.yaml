@@ -3,8 +3,8 @@ deployAs:
     applicationType: service
     endpoint: /cart-compatibility
     scripts:
-      postDeploy: npm install && node connector/post-deploy.js
-      preUndeploy: npm install && node connector/pre-undeploy.js
+      postDeploy: npm install && npm run connector:post-deploy
+      preUndeploy: npm install && npm run connector:pre-undeploy
     configuration:
       standardConfiguration:
         - key: CT_PROJECT_KEY
