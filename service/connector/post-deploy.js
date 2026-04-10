@@ -1,17 +1,15 @@
 /**
  * postDeploy — runs after Connect successfully deploys the service.
- *
- * CONNECT_SERVICE_URL is the full public URL of this application including
- * the endpoint path (e.g. https://service-xyz.europe-west1.gcp.commercetools.app/cart-compatibility).
- * Use it directly as the extension destination URL.
+ * CONNECT_SERVICE_URL is the full public URL including the endpoint path.
  */
+'use strict';
 
-import { apiRoot } from '../src/client';
+const { apiRoot } = require('../dist/client');
 
 const EXTENSION_KEY = 'dg-cart-compatibility';
 const CART_TYPE_KEY = 'cart-compatibility';
 
-async function run(): Promise<void> {
+async function run() {
   const serviceUrl = process.env.CONNECT_SERVICE_URL;
   const secret = process.env.EXTENSION_SECRET;
 
@@ -24,21 +22,18 @@ async function run(): Promise<void> {
   console.log('[post-deploy] Done');
 }
 
-async function ensureExtension(
-  serviceUrl: string,
-  secret: string
-): Promise<void> {
+async function ensureExtension(serviceUrl, secret) {
   const destination = {
-    type: 'HTTP' as const,
+    type: 'HTTP',
     url: serviceUrl,
     authentication: {
-      type: 'AuthorizationHeader' as const,
+      type: 'AuthorizationHeader',
       headerValue: `Bearer ${secret}`,
     },
   };
 
   const triggers = [
-    { resourceTypeId: 'cart' as const, actions: ['Create', 'Update'] as const },
+    { resourceTypeId: 'cart', actions: ['Create', 'Update'] },
   ];
 
   try {
@@ -60,9 +55,8 @@ async function ensureExtension(
       .execute();
 
     console.log(`[post-deploy] Extension updated → ${serviceUrl}`);
-  } catch (err: unknown) {
-    const error = err as { statusCode?: number };
-    if (error.statusCode !== 404) throw err;
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
 
     await apiRoot
       .extensions()
@@ -80,16 +74,13 @@ async function ensureExtension(
   }
 }
 
-async function ensureCartCompatibilityType(): Promise<void> {
+async function ensureCartCompatibilityType() {
   try {
     await apiRoot.types().withKey({ key: CART_TYPE_KEY }).get().execute();
-    console.log(
-      `[post-deploy] Custom Type '${CART_TYPE_KEY}' already exists — skipping`
-    );
+    console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' already exists — skipping`);
     return;
-  } catch (err: unknown) {
-    const error = err as { statusCode?: number };
-    if (error.statusCode !== 404) throw err;
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
   }
 
   await apiRoot
@@ -123,7 +114,7 @@ async function ensureCartCompatibilityType(): Promise<void> {
   console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' created`);
 }
 
-run().catch((err: Error) => {
+run().catch((err) => {
   console.error('[post-deploy] Failed:', err.message);
   process.exit(1);
 });

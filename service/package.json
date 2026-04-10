@@ -8,8 +8,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "test": "jest",
-    "connector:post-deploy": "ts-node connector/post-deploy.ts",
-    "connector:pre-undeploy": "ts-node connector/pre-undeploy.ts"
+    "connector:post-deploy": "node connector/post-deploy.js",
+    "connector:pre-undeploy": "node connector/pre-undeploy.js"
   },
   "engines": {
     "node": ">=18"
