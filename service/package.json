@@ -1,15 +1,15 @@
 {
   "name": "dg-cart-compatibility-service",
-  "version": "1.0.2",
-  "description": "commercetools Connect service — UC3 Cart Compatibility Extension for Nescafé Dolce Gusto",
-  "main": "index.js",
+  "version": "1.0.0",
+  "description": "UC3 Cart Compatibility Extension for Nescafé Dolce Gusto — commercetools Connect service",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "echo 'No build step required'",
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "test": "node --test tests/rules.test.js",
-    "connector:post-deploy": "node connector/post-deploy.js",
-    "connector:pre-undeploy": "node connector/pre-undeploy.js"
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "connector:post-deploy": "ts-node connector/post-deploy.ts",
+    "connector:pre-undeploy": "ts-node connector/pre-undeploy.ts"
   },
   "engines": {
     "node": ">=18"
@@ -17,6 +17,19 @@
   "dependencies": {
     "@commercetools/platform-sdk": "^7.15.0",
     "@commercetools/sdk-client-v2": "^3.3.2",
-    "express": "^4.21.2"
+    "express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.17.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "glob": "^11.0.0",
+    "inflight": "^1.0.6"
   }
 }
