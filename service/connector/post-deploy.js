@@ -191,7 +191,7 @@ async function ensureCustomBoxProductType() {
             name: 'capsule-limit',
             label: { 'en-US': 'Capsule Limit' },
             isRequired: true,
-            type: { name: 'Number' },
+            type: { name: 'number' },
             attributeConstraint: 'SameForAll',
             isSearchable: false,
           },
@@ -200,7 +200,7 @@ async function ensureCustomBoxProductType() {
             label: { 'en-US': 'Generation' },
             isRequired: true,
             type: {
-              name: 'Enum',
+              name: 'enum',
               values: [
                 { key: 'gen1', label: 'Gen1' },
                 { key: 'gen2', label: 'Gen2' },
