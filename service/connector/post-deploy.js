@@ -74,35 +74,70 @@ async function ensureExtension(serviceUrl, secret) {
   }
 }
 
+const FIELD_DEFS = [
+  {
+    name: 'compatibility-warning',
+    label: { 'en-US': 'Compatibility Warning' },
+    required: false,
+    type: { name: 'String' },
+  },
+  {
+    name: 'most-consumed-item',
+    label: { 'en-US': 'Most Consumed Item' },
+    required: false,
+    type: { name: 'Boolean' },
+  },
+];
+
 async function ensureCartCompatibilityType() {
+  let existing;
   try {
-    await apiRoot.types().withKey({ key: CART_TYPE_KEY }).get().execute();
-    console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' already exists — skipping`);
-    return;
+    const result = await apiRoot.types().withKey({ key: CART_TYPE_KEY }).get().execute();
+    existing = result.body;
   } catch (err) {
     if (err.statusCode !== 404) throw err;
   }
 
-  await apiRoot
-    .types()
-    .post({
-      body: {
-        key: CART_TYPE_KEY,
-        name: { 'en-US': 'Cart Compatibility' },
-        resourceTypeIds: ['line-item'],
-        fieldDefinitions: [
-          {
-            name: 'compatibility-warning',
-            label: { 'en-US': 'Compatibility Warning' },
-            required: false,
-            type: { name: 'String' },
-          },
-        ],
-      },
-    })
-    .execute();
+  if (!existing) {
+    await apiRoot
+      .types()
+      .post({
+        body: {
+          key: CART_TYPE_KEY,
+          name: { 'en-US': 'Cart Compatibility' },
+          resourceTypeIds: ['line-item'],
+          fieldDefinitions: FIELD_DEFS,
+        },
+      })
+      .execute();
+    console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' created`);
+    return;
+  }
 
-  console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' created`);
+  // Type exists — add any missing fields
+  const existingNames = new Set((existing.fieldDefinitions ?? []).map((f) => f.name));
+  const missing = FIELD_DEFS.filter((f) => !existingNames.has(f.name));
+
+  if (missing.length === 0) {
+    console.log(`[post-deploy] Custom Type '${CART_TYPE_KEY}' already up-to-date`);
+    return;
+  }
+
+  let version = existing.version;
+  for (const fieldDef of missing) {
+    const updated = await apiRoot
+      .types()
+      .withKey({ key: CART_TYPE_KEY })
+      .post({
+        body: {
+          version,
+          actions: [{ action: 'addFieldDefinition', fieldDefinition: fieldDef }],
+        },
+      })
+      .execute();
+    version = updated.body.version;
+    console.log(`[post-deploy] Added field '${fieldDef.name}' to '${CART_TYPE_KEY}'`);
+  }
 }
 
 run().catch((err) => {

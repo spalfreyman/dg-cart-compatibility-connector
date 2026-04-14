@@ -48,6 +48,15 @@ function getItemName(li: LineItem): string {
 }
 
 /**
+ * Returns the set of product IDs in the customer's Top-Three field.
+ */
+export function getTopThreeProductIds(customer: Customer | null): Set<string> {
+  if (!customer?.custom?.fields?.['Top-Three']) return new Set();
+  const refs = customer.custom.fields['Top-Three'] as Array<{ id: string }>;
+  return new Set(refs.map((ref) => ref.id));
+}
+
+/**
  * Evaluate per-line-item compatibility against the customer profile.
  * Returns one entry per NEO line item — warning=null means compatible (clears any stale warning).
  * Returns [] if cart has no NEO products.

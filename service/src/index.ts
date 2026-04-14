@@ -5,11 +5,12 @@ import express, {
 } from 'express';
 import type { Cart, Customer } from '@commercetools/platform-sdk';
 import { apiRoot } from './client';
-import { checkCompatibility, type LineItemWarning } from './rules';
+import { checkCompatibility, getTopThreeProductIds, type LineItemWarning } from './rules';
 
 const EXTENSION_KEY = 'dg-cart-compatibility';
 const CART_TYPE_KEY = 'cart-compatibility';
 const WARNING_FIELD = 'compatibility-warning';
+const TOP_THREE_FIELD = 'most-consumed-item';
 
 const app = express();
 app.use(express.json());
@@ -58,7 +59,8 @@ app.post('/cart-compatibility', async (req: Request, res: Response) => {
     }
 
     const lineItemWarnings = checkCompatibility(cart, customer);
-    const actions = buildActions(cart, lineItemWarnings);
+    const topThreeProductIds = getTopThreeProductIds(customer);
+    const actions = buildActions(cart, lineItemWarnings, topThreeProductIds);
 
     res.status(200).json({ actions });
   } catch (error) {
@@ -68,45 +70,76 @@ app.post('/cart-compatibility', async (req: Request, res: Response) => {
   }
 });
 
-function buildActions(cart: Cart, lineItemWarnings: LineItemWarning[]): object[] {
-  return lineItemWarnings.flatMap(({ lineItemId, warning }): object[] => {
-    const lineItem = cart.lineItems.find((li) => li.id === lineItemId);
-    if (!lineItem) return [];
+function buildActions(
+  cart: Cart,
+  lineItemWarnings: LineItemWarning[],
+  topThreeProductIds: Set<string>
+): object[] {
+  const warningMap = new Map(lineItemWarnings.map((w) => [w.lineItemId, w.warning]));
+
+  return cart.lineItems.flatMap((lineItem): object[] => {
+    const warning = warningMap.get(lineItem.id) ?? null;
+    const mostConsumed = lineItem.productId ? topThreeProductIds.has(lineItem.productId) : false;
+
+    const currentWarning = lineItem.custom?.fields?.[WARNING_FIELD] as string | null | undefined;
+    const currentMostConsumed = lineItem.custom?.fields?.[TOP_THREE_FIELD] as boolean | undefined;
+    const hasType = !!lineItem.custom?.type;
+
+    // Skip if there is nothing to set or clear
+    if (!warning && !mostConsumed && currentWarning == null && !currentMostConsumed) return [];
+
+    if (!hasType) {
+      // Set custom type and write whichever fields have values
+      const fields: Record<string, unknown> = {};
+      if (warning !== null) fields[WARNING_FIELD] = warning;
+      if (mostConsumed) fields[TOP_THREE_FIELD] = true;
+      if (Object.keys(fields).length === 0) return [];
+      return [
+        {
+          action: 'setLineItemCustomType',
+          lineItemId: lineItem.id,
+          type: { key: CART_TYPE_KEY, typeId: 'type' },
+          fields,
+        },
+      ];
+    }
+
+    // Type already set — update individual fields
+    const actions: object[] = [];
 
     if (warning !== null) {
-      if (!lineItem.custom?.type) {
-        return [
-          {
-            action: 'setLineItemCustomType',
-            lineItemId,
-            type: { key: CART_TYPE_KEY, typeId: 'type' },
-            fields: { [WARNING_FIELD]: warning },
-          },
-        ];
-      }
-      return [
-        {
-          action: 'setLineItemCustomField',
-          lineItemId,
-          name: WARNING_FIELD,
-          value: warning,
-        },
-      ];
+      actions.push({
+        action: 'setLineItemCustomField',
+        lineItemId: lineItem.id,
+        name: WARNING_FIELD,
+        value: warning,
+      });
+    } else if (currentWarning != null) {
+      actions.push({
+        action: 'setLineItemCustomField',
+        lineItemId: lineItem.id,
+        name: WARNING_FIELD,
+        value: null,
+      });
     }
 
-    // warning is null — only clear if the field actually has a value
-    if (lineItem.custom?.fields?.[WARNING_FIELD] != null) {
-      return [
-        {
-          action: 'setLineItemCustomField',
-          lineItemId,
-          name: WARNING_FIELD,
-          value: null,
-        },
-      ];
+    if (mostConsumed && !currentMostConsumed) {
+      actions.push({
+        action: 'setLineItemCustomField',
+        lineItemId: lineItem.id,
+        name: TOP_THREE_FIELD,
+        value: true,
+      });
+    } else if (!mostConsumed && currentMostConsumed) {
+      actions.push({
+        action: 'setLineItemCustomField',
+        lineItemId: lineItem.id,
+        name: TOP_THREE_FIELD,
+        value: null,
+      });
     }
 
-    return [];
+    return actions;
   });
 }
 
