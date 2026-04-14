@@ -73,10 +73,8 @@ function buildActions(cart: Cart, lineItemWarnings: LineItemWarning[]): object[]
     const lineItem = cart.lineItems.find((li) => li.id === lineItemId);
     if (!lineItem) return [];
 
-    const hasType = !!lineItem.custom?.type;
-
     if (warning !== null) {
-      if (!hasType) {
+      if (!lineItem.custom?.type) {
         return [
           {
             action: 'setLineItemCustomType',
@@ -96,8 +94,8 @@ function buildActions(cart: Cart, lineItemWarnings: LineItemWarning[]): object[]
       ];
     }
 
-    // warning is null — clear any stale warning if the type is set
-    if (hasType) {
+    // warning is null — only clear if the field actually has a value
+    if (lineItem.custom?.fields?.[WARNING_FIELD] != null) {
       return [
         {
           action: 'setLineItemCustomField',
