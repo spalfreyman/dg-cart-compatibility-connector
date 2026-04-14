@@ -92,11 +92,11 @@ function getBoxContentCount(lineItem: LineItem): number {
 }
 
 function getCapsuleLimit(lineItem: LineItem): number {
-  return (
+  const limitPerUnit =
     (getAttr(lineItem.variant?.attributes ?? [], 'capsule-limit') as
       | number
-      | undefined) ?? 0
-  );
+      | undefined) ?? 0;
+  return limitPerUnit * lineItem.quantity;
 }
 
 // ─── Exported: Top-Three lookup ───────────────────────────────────────────────

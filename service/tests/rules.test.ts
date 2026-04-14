@@ -469,17 +469,44 @@ describe('buildCustomBoxAssignments', () => {
     });
   });
 
+  describe('qty > 1 custom box — overflow recovery after addLineItem increments quantity', () => {
+    it('treats a qty=2 custom box as having doubled capacity (100 slots)', () => {
+      // Simulates the state AFTER overflow: the extension returned addLineItem,
+      // which incremented the custom box qty from 1 to 2.
+      // Capacity = 50 × 2 = 100; total selections = 60 → all fit, no addBoxAction.
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z', 2);
+      const esp = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 30); // 30 slots
+      const lat = makePickAndMixSelection('sel-2', 'BOX-GEN1-LATTE-MACCHIATO-8', 2, 10); // 20 slots
+      const lun = makePickAndMixSelection('sel-3', 'BOX-GEN1-LUNGO-FORTE-16', 1, 10);   // 10 slots
+      const result = buildCustomBoxAssignments(makeCart([box, esp, lat, lun]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(60);
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxSelectionIds).toHaveLength(3);
+      expect(result.fieldValuesByLineItemId.get('sel-1')?.assignedBoxId).toBe('box-1');
+      expect(result.fieldValuesByLineItemId.get('sel-2')?.assignedBoxId).toBe('box-1');
+      expect(result.fieldValuesByLineItemId.get('sel-3')?.assignedBoxId).toBe('box-1');
+    });
+
+    it('still returns addBoxAction when selections exceed doubled capacity', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z', 2); // 100 slots
+      const sel1 = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 60); // 60 slots
+      const sel2 = makePickAndMixSelection('sel-2', 'BOX-GEN1-LUNGO-FORTE-16', 1, 50);     // 50 → total 110 > 100
+      const result = buildCustomBoxAssignments(makeCart([box, sel1, sel2]));
+
+      expect(result.addBoxAction).not.toBeNull();
+      expect(result.fieldValuesByLineItemId.size).toBe(0);
+    });
+  });
+
   describe('edge cases', () => {
-    it('returns no addBoxAction when a single selection slot cost exceeds any box capacity', () => {
-      // qty 60 × 1-slot capsule = 60 slots, but box limit is 50 → no box can ever fit it
+    it('returns addBoxAction when selection cost exceeds single-unit box capacity', () => {
+      // qty 60 × 1-slot capsule = 60 slots; single box (qty=1) has limit 50 → overflow.
+      // On the next extension call, addLineItem makes qty=2 → capacity=100 → all fit.
       const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
       const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 60);
       const result = buildCustomBoxAssignments(makeCart([box, sel]));
 
-      // The while loop exhausts all boxes (running total 0, cost 60 > limit 50)
-      // returns addBoxAction because currentBoxIndex >= sortedBoxes.length
-      // (This is the known limitation: the extension will keep trying to add a box,
-      //  but each new box also won't fit — callers should validate qty × contentCount ≤ limit)
       expect((result.addBoxAction as Record<string, unknown> | null)?.action ?? null).toBe('addLineItem');
     });
 
