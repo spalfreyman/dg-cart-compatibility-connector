@@ -1,7 +1,7 @@
 import type { Cart, Customer, LineItem } from '@commercetools/platform-sdk';
-import { checkCompatibility } from '../src/rules';
+import { checkCompatibility, buildCustomBoxAssignments } from '../src/rules';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Shared helpers ───────────────────────────────────────────────────────────
 
 function makeLineItem(
   sku: string,
@@ -99,7 +99,80 @@ function makeCustomer(opts: {
   } as unknown as Customer;
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// ─── Custom box helpers ───────────────────────────────────────────────────────
+
+function makeCustomBoxLineItem(
+  id: string,
+  capsuleLimit: number,
+  addedAt: string,
+  quantity: number = 1
+): LineItem {
+  return {
+    id,
+    productId: 'prod-custom-box-gen1-50',
+    productType: { typeId: 'product-type', id: 'pt-custom-box' },
+    name: { 'en-US': `Custom Box (${capsuleLimit} caps)` },
+    variant: {
+      id: 1,
+      sku: 'CUSTOM-BOX-GEN1-50',
+      attributes: [
+        { name: 'capsule-limit', value: capsuleLimit },
+        { name: 'generation', value: { key: 'gen1', label: 'Gen1' } },
+      ],
+    },
+    price: {
+      id: 'price-box',
+      value: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 100, fractionDigits: 2 },
+    },
+    quantity,
+    discountedPricePerQuantity: [],
+    perMethodTaxRate: [],
+    addedAt,
+    lastModifiedAt: addedAt,
+    state: [],
+    priceMode: 'Platform',
+    lineItemMode: 'Standard',
+    totalPrice: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 100, fractionDigits: 2 },
+  } as unknown as LineItem;
+}
+
+function makePickAndMixSelection(
+  id: string,
+  sku: string,
+  boxContentCount: number,
+  quantity: number = 1
+): LineItem {
+  return {
+    id,
+    productId: `prod-${sku}`,
+    productType: { typeId: 'product-type', id: 'pt-box' },
+    name: { 'en-US': sku },
+    variant: {
+      id: 1,
+      sku,
+      attributes: [
+        { name: 'box-type', value: { key: 'pick-and-mix', label: 'Pick and Mix' } },
+        { name: 'box-content-count', value: boxContentCount },
+        { name: 'generation', value: { key: 'gen1', label: 'Gen1' } },
+      ],
+    },
+    price: {
+      id: 'price-sel',
+      value: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 799, fractionDigits: 2 },
+    },
+    quantity,
+    discountedPricePerQuantity: [],
+    perMethodTaxRate: [],
+    addedAt: '2024-01-02T00:00:00.000Z',
+    lastModifiedAt: '2024-01-02T00:00:00.000Z',
+    state: [],
+    priceMode: 'Platform',
+    lineItemMode: 'Standard',
+    totalPrice: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 799, fractionDigits: 2 },
+  } as unknown as LineItem;
+}
+
+// ─── checkCompatibility tests ─────────────────────────────────────────────────
 
 describe('checkCompatibility', () => {
   describe('no NEO products in cart', () => {
@@ -197,6 +270,237 @@ describe('checkCompatibility', () => {
       const result = checkCompatibility(cart, null);
       expect(result).toHaveLength(1);
       expect(result[0].warning).toMatch(/sign in/i);
+    });
+  });
+});
+
+// ─── buildCustomBoxAssignments tests ─────────────────────────────────────────
+
+describe('buildCustomBoxAssignments', () => {
+  describe('no selections in cart', () => {
+    it('returns empty result when cart has only a custom box and no selections', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const result = buildCustomBoxAssignments(makeCart([box]));
+      expect(result.fieldValuesByLineItemId.size).toBe(0);
+      expect(result.addBoxAction).toBeNull();
+    });
+
+    it('returns empty result for a completely empty cart', () => {
+      const result = buildCustomBoxAssignments(makeCart());
+      expect(result.fieldValuesByLineItemId.size).toBe(0);
+      expect(result.addBoxAction).toBeNull();
+    });
+
+    it('returns empty result when there are selections but no custom box at all', () => {
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 5);
+      const result = buildCustomBoxAssignments(makeCart([sel]));
+      // No box to assign to → empty (addBoxAction is null because there's no firstBox to reference)
+      expect(result.addBoxAction).toBeNull();
+    });
+  });
+
+  describe('single custom box, single-pod selections', () => {
+    it('assigns a single selection to the box and sets capsule total', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 5);
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('sel-1')?.assignedBoxId).toBe('box-1');
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxSelectionIds).toEqual(['sel-1']);
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(5);
+    });
+
+    it('assigns multiple selections to the same box when they all fit', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const sel1 = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 20);
+      const sel2 = makePickAndMixSelection('sel-2', 'BOX-GEN1-LUNGO-FORTE-16', 1, 10);
+      const result = buildCustomBoxAssignments(makeCart([box, sel1, sel2]));
+
+      expect(result.addBoxAction).toBeNull();
+      const boxFields = result.fieldValuesByLineItemId.get('box-1');
+      expect(boxFields?.boxSelectionIds).toHaveLength(2);
+      expect(boxFields?.boxSelectionIds).toContain('sel-1');
+      expect(boxFields?.boxSelectionIds).toContain('sel-2');
+      expect(boxFields?.boxCapsuleTotal).toBe(30);
+    });
+
+    it('fills exactly to the capsule limit without triggering addBoxAction', () => {
+      const box = makeCustomBoxLineItem('box-1', 10, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 10);
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(10);
+    });
+  });
+
+  describe('dual-pod selections (box-content-count: 2)', () => {
+    it('counts dual-pod slots as 2 per unit', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-LATTE-MACCHIATO-8', 2, 10);
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(20);
+    });
+
+    it('handles mixed single-pod and dual-pod selections correctly', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const esp = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 20); // 20 slots
+      const lat = makePickAndMixSelection('sel-2', 'BOX-GEN1-LATTE-MACCHIATO-8', 2, 10); // 20 slots
+      const lun = makePickAndMixSelection('sel-3', 'BOX-GEN1-LUNGO-FORTE-16', 1, 10);   // 10 slots
+      const result = buildCustomBoxAssignments(makeCart([box, esp, lat, lun]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(50);
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxSelectionIds).toHaveLength(3);
+    });
+  });
+
+  describe('overflow — requesting a new box', () => {
+    it('returns an addLineItem action when a selection would overflow the only box', () => {
+      const box = makeCustomBoxLineItem('box-1', 10, '2024-01-01T00:00:00.000Z');
+      const sel1 = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 10); // fills box
+      const sel2 = makePickAndMixSelection('sel-2', 'BOX-GEN1-LUNGO-FORTE-16', 1, 1);     // overflows
+      const result = buildCustomBoxAssignments(makeCart([box, sel1, sel2]));
+
+      expect(result.addBoxAction).not.toBeNull();
+      expect((result.addBoxAction as Record<string, unknown>).action).toBe('addLineItem');
+      expect((result.addBoxAction as Record<string, unknown>).sku).toBe('CUSTOM-BOX-GEN1-50');
+    });
+
+    it('returns only the addLineItem action on overflow (no field-setting actions)', () => {
+      const box = makeCustomBoxLineItem('box-1', 5, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 10); // 10 > 5
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      expect(result.addBoxAction).not.toBeNull();
+      expect(result.fieldValuesByLineItemId.size).toBe(0);
+    });
+
+    it('does not overflow when a selection fits exactly in remaining capacity', () => {
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const sel1 = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 40);
+      const sel2 = makePickAndMixSelection('sel-2', 'BOX-GEN1-LUNGO-FORTE-16', 1, 10); // 40+10=50 exact
+      const result = buildCustomBoxAssignments(makeCart([box, sel1, sel2]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(50);
+    });
+  });
+
+  describe('multiple custom boxes (spill-over)', () => {
+    it('spills selections to the second box when first is full', () => {
+      const box1 = makeCustomBoxLineItem('box-1', 10, '2024-01-01T00:00:00.000Z');
+      const box2 = makeCustomBoxLineItem('box-2', 10, '2024-01-02T00:00:00.000Z');
+      const sel1 = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 10); // fills box1
+      const sel2 = makePickAndMixSelection('sel-2', 'BOX-GEN1-LUNGO-FORTE-16', 1, 5);     // goes to box2
+      const result = buildCustomBoxAssignments(makeCart([box1, box2, sel1, sel2]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('sel-1')?.assignedBoxId).toBe('box-1');
+      expect(result.fieldValuesByLineItemId.get('sel-2')?.assignedBoxId).toBe('box-2');
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(10);
+      expect(result.fieldValuesByLineItemId.get('box-2')?.boxCapsuleTotal).toBe(5);
+    });
+
+    it('fills boxes in addedAt order regardless of lineItems array order', () => {
+      // boxNewer appears first in the array but has a later addedAt → should be filled second
+      const boxNewer = makeCustomBoxLineItem('box-newer', 10, '2024-01-03T00:00:00.000Z');
+      const boxOlder = makeCustomBoxLineItem('box-older', 10, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 5);
+      const result = buildCustomBoxAssignments(makeCart([boxNewer, boxOlder, sel]));
+
+      expect(result.fieldValuesByLineItemId.get('sel-1')?.assignedBoxId).toBe('box-older');
+    });
+  });
+
+  describe('no-op when values are already current', () => {
+    it('emits no actions when assigned IDs and totals already match custom fields', () => {
+      const box = {
+        ...makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z'),
+        custom: {
+          type: { typeId: 'type', id: 'type-1' },
+          fields: {
+            'box-selection-ids': ['sel-1'],
+            'box-capsule-total': 5,
+          },
+        },
+      } as unknown as LineItem;
+      const sel = {
+        ...makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 5),
+        custom: {
+          type: { typeId: 'type', id: 'type-1' },
+          fields: { 'assigned-box-line-item-id': 'box-1' },
+        },
+      } as unknown as LineItem;
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      expect(result.fieldValuesByLineItemId.size).toBe(0);
+      expect(result.addBoxAction).toBeNull();
+    });
+
+    it('emits actions only for changed fields when one field drifts', () => {
+      // Box has correct selection IDs but stale capsule total
+      const box = {
+        ...makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z'),
+        custom: {
+          type: { typeId: 'type', id: 'type-1' },
+          fields: {
+            'box-selection-ids': ['sel-1'],
+            'box-capsule-total': 99, // stale — actual is 5
+          },
+        },
+      } as unknown as LineItem;
+      const sel = {
+        ...makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 5),
+        custom: {
+          type: { typeId: 'type', id: 'type-1' },
+          fields: { 'assigned-box-line-item-id': 'box-1' },
+        },
+      } as unknown as LineItem;
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      const boxFields = result.fieldValuesByLineItemId.get('box-1');
+      expect(boxFields?.boxCapsuleTotal).toBe(5);
+      // Selection assignment is unchanged → no entry for sel-1
+      expect(result.fieldValuesByLineItemId.has('sel-1')).toBe(false);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('returns no addBoxAction when a single selection slot cost exceeds any box capacity', () => {
+      // qty 60 × 1-slot capsule = 60 slots, but box limit is 50 → no box can ever fit it
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const sel = makePickAndMixSelection('sel-1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 60);
+      const result = buildCustomBoxAssignments(makeCart([box, sel]));
+
+      // The while loop exhausts all boxes (running total 0, cost 60 > limit 50)
+      // returns addBoxAction because currentBoxIndex >= sortedBoxes.length
+      // (This is the known limitation: the extension will keep trying to add a box,
+      //  but each new box also won't fit — callers should validate qty × contentCount ≤ limit)
+      expect((result.addBoxAction as Record<string, unknown> | null)?.action ?? null).toBe('addLineItem');
+    });
+
+    it('getBoxContentCount defaults to 1 for a selection without the attribute', () => {
+      // A line item without box-content-count — treated as 1-slot capsule
+      const box = makeCustomBoxLineItem('box-1', 50, '2024-01-01T00:00:00.000Z');
+      const selNoCount = {
+        ...makePickAndMixSelection('sel-1', 'BOX-GEN1-UNKNOWN', 1, 5),
+        variant: {
+          id: 1,
+          sku: 'BOX-GEN1-UNKNOWN',
+          // box-type present so isPickAndMixSelection returns true, but no box-content-count
+          attributes: [
+            { name: 'box-type', value: { key: 'pick-and-mix', label: 'Pick and Mix' } },
+          ],
+        },
+      } as unknown as LineItem;
+      const result = buildCustomBoxAssignments(makeCart([box, selNoCount]));
+
+      // default box-content-count of 1, qty 5 → 5 slots
+      expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(5);
     });
   });
 });

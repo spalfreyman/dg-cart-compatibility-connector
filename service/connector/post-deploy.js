@@ -8,6 +8,7 @@ const { apiRoot } = require('../dist/client');
 
 const EXTENSION_KEY = 'dg-cart-compatibility';
 const CART_TYPE_KEY = 'cart-compatibility';
+const CUSTOM_BOX_PRODUCT_TYPE_KEY = 'product-type-custom-box';
 
 async function run() {
   const serviceUrl = process.env.CONNECT_SERVICE_URL;
@@ -18,6 +19,7 @@ async function run() {
 
   await ensureExtension(serviceUrl, secret);
   await ensureCartCompatibilityType();
+  await ensureCustomBoxProductType();
 
   console.log('[post-deploy] Done');
 }
@@ -87,6 +89,24 @@ const FIELD_DEFS = [
     required: false,
     type: { name: 'Boolean' },
   },
+  {
+    name: 'box-selection-ids',
+    label: { 'en-US': 'Box Selection IDs' },
+    required: false,
+    type: { name: 'Set', elementType: { name: 'String' } },
+  },
+  {
+    name: 'box-capsule-total',
+    label: { 'en-US': 'Box Capsule Total' },
+    required: false,
+    type: { name: 'Number' },
+  },
+  {
+    name: 'assigned-box-line-item-id',
+    label: { 'en-US': 'Assigned Box Line Item ID' },
+    required: false,
+    type: { name: 'String' },
+  },
 ];
 
 async function ensureCartCompatibilityType() {
@@ -138,6 +158,63 @@ async function ensureCartCompatibilityType() {
     version = updated.body.version;
     console.log(`[post-deploy] Added field '${fieldDef.name}' to '${CART_TYPE_KEY}'`);
   }
+}
+
+async function ensureCustomBoxProductType() {
+  let existing;
+  try {
+    const result = await apiRoot
+      .productTypes()
+      .withKey({ key: CUSTOM_BOX_PRODUCT_TYPE_KEY })
+      .get()
+      .execute();
+    existing = result.body;
+  } catch (err) {
+    if (err.statusCode !== 404) throw err;
+  }
+
+  if (existing) {
+    console.log(`[post-deploy] Product Type '${CUSTOM_BOX_PRODUCT_TYPE_KEY}' already exists`);
+    return;
+  }
+
+  await apiRoot
+    .productTypes()
+    .post({
+      body: {
+        key: CUSTOM_BOX_PRODUCT_TYPE_KEY,
+        name: 'Custom Box',
+        description:
+          'Purchasable custom box allowing customers to fill capsule slots from pick-and-mix selections',
+        attributes: [
+          {
+            name: 'capsule-limit',
+            label: { 'en-US': 'Capsule Limit' },
+            isRequired: true,
+            type: { name: 'Number' },
+            attributeConstraint: 'SameForAll',
+            isSearchable: false,
+          },
+          {
+            name: 'generation',
+            label: { 'en-US': 'Generation' },
+            isRequired: true,
+            type: {
+              name: 'Enum',
+              values: [
+                { key: 'gen1', label: 'Gen1' },
+                { key: 'gen2', label: 'Gen2' },
+              ],
+            },
+            attributeConstraint: 'SameForAll',
+            isSearchable: true,
+          },
+        ],
+      },
+    })
+    .execute();
+
+  console.log(`[post-deploy] Product Type '${CUSTOM_BOX_PRODUCT_TYPE_KEY}' created`);
 }
 
 run().catch((err) => {
