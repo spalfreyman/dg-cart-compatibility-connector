@@ -88,23 +88,14 @@ async function ensureCartCompatibilityType() {
     .post({
       body: {
         key: CART_TYPE_KEY,
-        name: {
-          'en-US': 'Cart Compatibility',
-          'de-DE': 'Warenkorb-Kompatibilität',
-        },
-        resourceTypeIds: ['order', 'cart'],
+        name: { 'en-US': 'Cart Compatibility' },
+        resourceTypeIds: ['line-item'],
         fieldDefinitions: [
           {
-            name: 'compatibility-warnings',
-            label: {
-              'en-US': 'Compatibility Warnings',
-              'de-DE': 'Kompatibilitätswarnungen',
-            },
+            name: 'compatibility-warning',
+            label: { 'en-US': 'Compatibility Warning' },
             required: false,
-            type: {
-              name: 'Set',
-              elementType: { name: 'String' },
-            },
+            type: { name: 'String' },
           },
         ],
       },

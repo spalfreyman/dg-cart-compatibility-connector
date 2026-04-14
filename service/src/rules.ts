@@ -3,6 +3,11 @@ import type { Cart, Customer, LineItem } from '@commercetools/platform-sdk';
 const NEO_MACHINE_SKU_PREFIX = 'MACH-NEO-';
 const NEO_ADAPTER_SKU = 'neo-adapter';
 
+export interface LineItemWarning {
+  lineItemId: string;
+  warning: string | null;
+}
+
 function getAttr(
   attributes: { name: string; value: unknown }[] = [],
   name: string
@@ -43,18 +48,22 @@ function getItemName(li: LineItem): string {
 }
 
 /**
- * Evaluate cart compatibility against the customer profile.
- * Returns an array of warning strings — empty means fully compatible.
+ * Evaluate per-line-item compatibility against the customer profile.
+ * Returns one entry per NEO line item — warning=null means compatible (clears any stale warning).
+ * Returns [] if cart has no NEO products.
  */
 export function checkCompatibility(
   cart: Cart,
   customer: Customer | null
-): string[] {
+): LineItemWarning[] {
   const lineItems = cart.lineItems ?? [];
   const neoItems = lineItems.filter(isNeoProduct);
 
   if (neoItems.length === 0) return [];
-  if (cartHasNeoMachine(lineItems)) return [];
+
+  if (cartHasNeoMachine(lineItems)) {
+    return neoItems.map((li) => ({ lineItemId: li.id, warning: null }));
+  }
 
   const fields = (customer?.custom?.fields ?? {}) as Record<string, unknown>;
   const isGen2 = fields['is-gen2'] === true;
@@ -62,39 +71,33 @@ export function checkCompatibility(
   const profileHasAdapter = fields['has-neo-adapter'] === true;
   const adapterInCart = cartHasNeoAdapter(lineItems);
 
-  if (isGen2) return [];
+  if (isGen2) {
+    return neoItems.map((li) => ({ lineItemId: li.id, warning: null }));
+  }
 
-  if (!isGen1 && !isGen2) {
-    return [
-      "You don't have a compatible machine for NEO products in your cart. " +
-        'Please add a NEO machine or sign in to verify your machine compatibility.',
-    ];
+  if (!isGen1) {
+    return neoItems.map((li) => ({
+      lineItemId: li.id,
+      warning:
+        "You don't have a compatible machine for this product. " +
+        'Please sign in to verify your machine compatibility.',
+    }));
   }
 
   const hasAdapter = profileHasAdapter || adapterInCart;
 
   if (!hasAdapter) {
-    return [
-      "You don't have a compatible machine. NEO capsules require a NEO machine or the Neo Adapter accessory.",
-    ];
+    return neoItems.map((li) => ({
+      lineItemId: li.id,
+      warning:
+        "You don't have a compatible machine. NEO capsules require a NEO machine or the Neo Adapter accessory.",
+    }));
   }
 
-  const blockedItems = neoItems.filter((li) => !isAdapterCompatible(li));
-  const okItems = neoItems.filter((li) => isAdapterCompatible(li));
-
-  if (blockedItems.length === 0) return [];
-
-  const blockedNames = blockedItems.map(getItemName).join(', ');
-
-  if (okItems.length > 0) {
-    return [
-      `Partial compatibility: your Gen1 machine with the Neo Adapter can brew most NEO pods, ` +
-        `but the following product(s) require a NEO machine: ${blockedNames}.`,
-    ];
-  }
-
-  return [
-    `Incompatible products: ${blockedNames} cannot be used with the Neo Adapter on a Gen1 machine. ` +
-      'A NEO machine is required.',
-  ];
+  return neoItems.map((li) => ({
+    lineItemId: li.id,
+    warning: isAdapterCompatible(li)
+      ? null
+      : `${getItemName(li)} cannot be used with the Neo Adapter on a Gen1 machine. A NEO machine is required.`,
+  }));
 }
