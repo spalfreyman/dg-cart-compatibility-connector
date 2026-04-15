@@ -328,7 +328,7 @@ describe('checkCompatibility', () => {
     });
   });
 
-  describe('Gen2 customer — compatible with gen2 only', () => {
+  describe('Gen2 customer — compatible with gen2 and gen1.5', () => {
     it('returns warning=null for gen2 boxes', () => {
       const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen2')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
@@ -343,11 +343,11 @@ describe('checkCompatibility', () => {
       expect(result[0].warning).toMatch(/Gen1 machines/i);
     });
 
-    it('warns for gen1.5 boxes (not compatible with NEO machine)', () => {
+    it('returns warning=null for gen1.5 boxes (gen2 is backwards-compatible)', () => {
       const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
       expect(result).toHaveLength(1);
-      expect(result[0].warning).toMatch(/Neo Adapter/i);
+      expect(result[0].warning).toBeNull();
     });
   });
 

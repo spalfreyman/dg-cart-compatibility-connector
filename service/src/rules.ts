@@ -146,7 +146,10 @@ export function checkCompatibility(
     compatible.add('gen1');
     if (hasAdapter) compatible.add('gen1.5');
   }
-  if (isGen2) compatible.add('gen2');
+  if (isGen2) {
+    compatible.add('gen2');
+    compatible.add('gen1.5'); // gen2 machines are backwards-compatible with gen1.5 capsules
+  }
 
   return capsuleItems.map((li) => {
     const gen = getGeneration(li)!;
