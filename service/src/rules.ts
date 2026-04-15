@@ -215,12 +215,16 @@ export function checkCompatibility(
  * Returns empty result (no actions, no addBoxAction) when there are no
  * pick-and-mix selections in the cart.
  */
-export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
-  const lineItems = cart.lineItems ?? [];
-
-  const customBoxes = lineItems.filter(isCustomBox);
-  const selections = lineItems.filter(isPickAndMixSelection);
-
+/**
+ * Runs the greedy fill algorithm for a single generation group of boxes and
+ * selections. Boxes and selections must already be filtered to the same
+ * generation before calling.
+ */
+function assignGroupToBoxes(
+  boxes: LineItem[],
+  selections: LineItem[],
+  allLineItems: LineItem[]
+): CustomBoxResult {
   const emptyResult: CustomBoxResult = {
     fieldValuesByLineItemId: new Map(),
     addBoxAction: null,
@@ -228,17 +232,14 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
 
   if (selections.length === 0) return emptyResult;
 
-  // Sort boxes oldest-first (fill order)
-  const sortedBoxes = [...customBoxes].sort(
+  const sortedBoxes = [...boxes].sort(
     (a, b) =>
       new Date(a.addedAt ?? 0).getTime() - new Date(b.addedAt ?? 0).getTime()
   );
 
-  // boxAssignments: box lineItem.id → assigned selection lineItem IDs
   const boxAssignments = new Map<string, string[]>(
     sortedBoxes.map((b) => [b.id, []])
   );
-  // selectionBoxMap: selection lineItem.id → assigned box lineItem.id
   const selectionBoxMap = new Map<string, string>();
 
   let currentBoxIndex = 0;
@@ -247,7 +248,6 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   for (const selection of selections) {
     const cost = selection.quantity * getBoxContentCount(selection);
 
-    // Advance past full boxes
     while (currentBoxIndex < sortedBoxes.length) {
       const box = sortedBoxes[currentBoxIndex];
       const limit = getCapsuleLimit(box);
@@ -257,9 +257,8 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
     }
 
     if (currentBoxIndex >= sortedBoxes.length) {
-      // No box has capacity — request another be added (same product/variant as first box)
       const firstBox = sortedBoxes[0];
-      if (!firstBox) return emptyResult; // no custom box in cart at all
+      if (!firstBox) return emptyResult;
       return {
         fieldValuesByLineItemId: new Map(),
         addBoxAction: {
@@ -276,13 +275,12 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
     runningTotal += cost;
   }
 
-  // Build per-line-item field value diffs
   const fieldValuesByLineItemId = new Map<string, CustomBoxFieldValues>();
 
   for (const box of sortedBoxes) {
     const assignedIds = boxAssignments.get(box.id) ?? [];
     const capsuleTotal = assignedIds.reduce((sum, selId) => {
-      const sel = lineItems.find((li) => li.id === selId)!;
+      const sel = allLineItems.find((li) => li.id === selId)!;
       return sum + sel.quantity * getBoxContentCount(sel);
     }, 0);
 
@@ -317,4 +315,42 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   }
 
   return { fieldValuesByLineItemId, addBoxAction: null };
+}
+
+export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
+  const lineItems = cart.lineItems ?? [];
+
+  const allCustomBoxes = lineItems.filter(isCustomBox);
+  const allSelections = lineItems.filter(isPickAndMixSelection);
+
+  const emptyResult: CustomBoxResult = {
+    fieldValuesByLineItemId: new Map(),
+    addBoxAction: null,
+  };
+
+  if (allSelections.length === 0) return emptyResult;
+
+  // Split by generation: gen1 boxes/selections vs NEO (gen2/gen1.5) boxes/selections.
+  // Items with no generation attribute are treated as gen1 (original/classic).
+  const isNeoGen = (gen: string | null) => gen === 'gen2' || gen === 'gen1.5';
+
+  const gen1Boxes = allCustomBoxes.filter((b) => !isNeoGen(getGeneration(b)));
+  const neoBoxes = allCustomBoxes.filter((b) => isNeoGen(getGeneration(b)));
+
+  const gen1Selections = allSelections.filter((s) => !isNeoGen(getGeneration(s)));
+  const neoSelections = allSelections.filter((s) => isNeoGen(getGeneration(s)));
+
+  // Process each generation group; return immediately if a new box is needed
+  const gen1Result = assignGroupToBoxes(gen1Boxes, gen1Selections, lineItems);
+  if (gen1Result.addBoxAction) return gen1Result;
+
+  const neoResult = assignGroupToBoxes(neoBoxes, neoSelections, lineItems);
+  if (neoResult.addBoxAction) return neoResult;
+
+  // Merge field-value maps from both groups
+  const merged = new Map<string, CustomBoxFieldValues>([
+    ...gen1Result.fieldValuesByLineItemId,
+    ...neoResult.fieldValuesByLineItemId,
+  ]);
+  return { fieldValuesByLineItemId: merged, addBoxAction: null };
 }
