@@ -143,6 +143,7 @@ export function checkCompatibility(
   if (isGen25) {
     compatible.add('gen2-5');
     compatible.add('gen2');
+    compatible.add('gen1.5'); // gen2.5 machines also support gen1.5 capsules
   }
 
   return capsuleItems.map((li) => {
@@ -185,12 +186,6 @@ export function checkCompatibility(
     }
 
     if (gen === 'gen1.5') {
-      if (isGen25) {
-        return {
-          lineItemId: li.id,
-          warning: `${name} is not compatible with your NEO Latte machine.`,
-        };
-      }
       return {
         lineItemId: li.id,
         warning: `${name} requires the Neo Adapter accessory on a Gen1 machine.`,

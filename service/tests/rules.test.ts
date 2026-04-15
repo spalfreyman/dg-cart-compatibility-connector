@@ -429,11 +429,11 @@ describe('checkCompatibility', () => {
       expect(result[0].warning).toBeNull();
     });
 
-    it('warns for gen1.5 boxes (not compatible with NEO Latte machine)', () => {
+    it('returns warning=null for gen1.5 boxes (gen2.5 machines support gen1.5 capsules)', () => {
       const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-ADAPT-8', 'gen1.5')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen25: true }));
       expect(result).toHaveLength(1);
-      expect(result[0].warning).toMatch(/NEO Latte/i);
+      expect(result[0].warning).toBeNull();
     });
 
     it('warns for gen1 boxes (not compatible with NEO Latte machine)', () => {

@@ -25,7 +25,8 @@ async function getCustomerCompatibleGens(customerId: string | undefined): Promis
     }
     if (fields['is-gen2-latte'] === true) {
       gens.add('gen2-5');
-      gens.add('gen2'); // gen2.5 machines support gen2 capsules
+      gens.add('gen2');   // gen2.5 machines support gen2 capsules
+      gens.add('gen1.5'); // gen2.5 machines also support gen1.5 capsules
     }
     return gens;
   } catch {
