@@ -9,6 +9,7 @@ export const CART_TYPE_KEY = 'cart-compatibility';
 // Pick & Mix
 export const PICK_AND_MIX_BOX_SKU = 'CUSTOM-BOX-GEN1-50';
 export const PICK_AND_MIX_BOX_NEO_SKU = 'CUSTOM-BOX-NEO-50';
+export const PICK_AND_MIX_BOX_GEN25_SKU = 'CUSTOM-BOX-GEN25-50';
 export const CAPSULE_LIMIT = 50;
 
 // Category slugs (CTP en-US) → display labels

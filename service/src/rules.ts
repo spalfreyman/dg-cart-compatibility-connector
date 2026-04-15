@@ -117,8 +117,9 @@ export function getTopThreeProductIds(customer: Customer | null): Set<string> {
 /**
  * Compatibility rules (per customer machine profile):
  *   is-gen1 = true                         → can buy generation=gen1
- *   is-gen2 = true                         → can buy generation=gen2
+ *   is-gen2 = true                         → can buy generation=gen2, gen1.5
  *   is-gen1 = true  +  has-neo-adapter     → can also buy generation=gen1.5
+ *   is-gen2-latte = true                   → can buy generation=gen2-5, gen2 ONLY
  *
  * Returns one entry per capsule line item (box-type or capsule-limit present).
  * warning=null means compatible and clears any stale warning.
@@ -136,6 +137,7 @@ export function checkCompatibility(
   const fields = (customer?.custom?.fields ?? {}) as Record<string, unknown>;
   const isGen1 = fields['is-gen1'] === true;
   const isGen2 = fields['is-gen2'] === true;
+  const isGen25 = fields['is-gen2-latte'] === true;
   const profileHasAdapter = fields['has-neo-adapter'] === true;
   const adapterInCart = cartHasNeoAdapter(lineItems);
   const hasAdapter = profileHasAdapter || adapterInCart;
@@ -149,6 +151,11 @@ export function checkCompatibility(
   if (isGen2) {
     compatible.add('gen2');
     compatible.add('gen1.5'); // gen2 machines are backwards-compatible with gen1.5 capsules
+  }
+  if (isGen25) {
+    compatible.add('gen2-5');
+    compatible.add('gen2'); // gen2.5 machines are backwards-compatible with gen2 capsules
+    // NOT gen1.5 — gen2.5 machines do not support gen1.5 capsules
   }
 
   return capsuleItems.map((li) => {
@@ -180,6 +187,13 @@ export function checkCompatibility(
     }
 
     // Incompatible — specific messages per generation mismatch
+    if (gen === 'gen2-5') {
+      return {
+        lineItemId: li.id,
+        warning: `${name} requires a NEO Latte (Gen 2.5) machine.`,
+      };
+    }
+
     if (gen === 'gen2') {
       return {
         lineItemId: li.id,
@@ -188,13 +202,19 @@ export function checkCompatibility(
     }
 
     if (gen === 'gen1.5') {
+      if (isGen25) {
+        return {
+          lineItemId: li.id,
+          warning: `${name} is not compatible with your NEO Latte machine.`,
+        };
+      }
       return {
         lineItemId: li.id,
         warning: `${name} requires the Neo Adapter accessory on a Gen1 machine.`,
       };
     }
 
-    // gen1 product, gen2 customer
+    // gen1 product — not compatible with NEO or NEO Latte machine
     return {
       lineItemId: li.id,
       warning: `${name} is designed for Gen1 machines and is not compatible with your NEO machine.`,
@@ -330,15 +350,24 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
 
   if (allSelections.length === 0) return emptyResult;
 
-  // Split by generation: gen1 boxes/selections vs NEO (gen2/gen1.5) boxes/selections.
-  // Items with no generation attribute are treated as gen1 (original/classic).
+  // Split by generation group:
+  //   gen1  — classic capsules (null-generation items default here)
+  //   neo   — gen2 and gen1.5 capsules (NEO machine / NEO machine + adapter)
+  //   gen25 — gen2-5 capsules (NEO Latte / Gen 2.5 machine only)
   const isNeoGen = (gen: string | null) => gen === 'gen2' || gen === 'gen1.5';
+  const isGen25Gen = (gen: string | null) => gen === 'gen2-5';
 
-  const gen1Boxes = allCustomBoxes.filter((b) => !isNeoGen(getGeneration(b)));
+  const gen1Boxes = allCustomBoxes.filter(
+    (b) => !isNeoGen(getGeneration(b)) && !isGen25Gen(getGeneration(b))
+  );
   const neoBoxes = allCustomBoxes.filter((b) => isNeoGen(getGeneration(b)));
+  const gen25Boxes = allCustomBoxes.filter((b) => isGen25Gen(getGeneration(b)));
 
-  const gen1Selections = allSelections.filter((s) => !isNeoGen(getGeneration(s)));
+  const gen1Selections = allSelections.filter(
+    (s) => !isNeoGen(getGeneration(s)) && !isGen25Gen(getGeneration(s))
+  );
   const neoSelections = allSelections.filter((s) => isNeoGen(getGeneration(s)));
+  const gen25Selections = allSelections.filter((s) => isGen25Gen(getGeneration(s)));
 
   // Process each generation group; return immediately if a new box is needed
   const gen1Result = assignGroupToBoxes(gen1Boxes, gen1Selections, lineItems);
@@ -347,10 +376,14 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   const neoResult = assignGroupToBoxes(neoBoxes, neoSelections, lineItems);
   if (neoResult.addBoxAction) return neoResult;
 
-  // Merge field-value maps from both groups
+  const gen25Result = assignGroupToBoxes(gen25Boxes, gen25Selections, lineItems);
+  if (gen25Result.addBoxAction) return gen25Result;
+
+  // Merge field-value maps from all groups
   const merged = new Map<string, CustomBoxFieldValues>([
     ...gen1Result.fieldValuesByLineItemId,
     ...neoResult.fieldValuesByLineItemId,
+    ...gen25Result.fieldValuesByLineItemId,
   ]);
   return { fieldValuesByLineItemId: merged, addBoxAction: null };
 }

@@ -125,6 +125,7 @@ function makeCustomer(opts: {
   isGen1?: boolean;
   isGen2?: boolean;
   hasAdapter?: boolean;
+  isGen25?: boolean;
 } = {}): Customer {
   return {
     id: 'cust-1',
@@ -141,6 +142,7 @@ function makeCustomer(opts: {
         'is-gen1': opts.isGen1 ?? false,
         'is-gen2': opts.isGen2 ?? false,
         'has-neo-adapter': opts.hasAdapter ?? false,
+        'is-gen2-latte': opts.isGen25 ?? false,
       },
     },
   } as unknown as Customer;
@@ -183,11 +185,47 @@ function makeCustomBoxLineItem(
   } as unknown as LineItem;
 }
 
+function makeCustomBoxGen25LineItem(
+  id: string,
+  capsuleLimit: number,
+  addedAt: string,
+  quantity: number = 1
+): LineItem {
+  return {
+    id,
+    productId: 'prod-custom-box-gen25-50',
+    productType: { typeId: 'product-type', id: 'pt-custom-box' },
+    name: { 'en-US': `Custom Box Gen2.5 (${capsuleLimit} caps)` },
+    variant: {
+      id: 1,
+      sku: 'CUSTOM-BOX-GEN25-50',
+      attributes: [
+        { name: 'capsule-limit', value: capsuleLimit },
+        { name: 'generation', value: { key: 'gen2-5', label: 'Gen2.5' } },
+      ],
+    },
+    price: {
+      id: 'price-box',
+      value: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 100, fractionDigits: 2 },
+    },
+    quantity,
+    discountedPricePerQuantity: [],
+    perMethodTaxRate: [],
+    addedAt,
+    lastModifiedAt: addedAt,
+    state: [],
+    priceMode: 'Platform',
+    lineItemMode: 'Standard',
+    totalPrice: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 100, fractionDigits: 2 },
+  } as unknown as LineItem;
+}
+
 function makePickAndMixSelection(
   id: string,
   sku: string,
   boxContentCount: number,
-  quantity: number = 1
+  quantity: number = 1,
+  generationKey: string = 'gen1'
 ): LineItem {
   return {
     id,
@@ -200,7 +238,7 @@ function makePickAndMixSelection(
       attributes: [
         { name: 'box-type', value: { key: 'pick-and-mix', label: 'Pick and Mix' } },
         { name: 'box-content-count', value: boxContentCount },
-        { name: 'generation', value: { key: 'gen1', label: 'Gen1' } },
+        { name: 'generation', value: { key: generationKey, label: generationKey } },
       ],
     },
     price: {
@@ -373,6 +411,52 @@ describe('checkCompatibility', () => {
       const result = checkCompatibility(cart, makeCustomer({}));
       expect(result).toHaveLength(1);
       expect(result[0].warning).toMatch(/No compatible machine/i);
+    });
+  });
+
+  describe('Gen2.5 (NEO Latte) customer — compatible with gen2-5 and gen2 only', () => {
+    it('returns warning=null for gen2-5 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-LATTE-MACCHIATO-12', 'gen2-5')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen25: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toBeNull();
+    });
+
+    it('returns warning=null for gen2 boxes (gen2.5 is backwards-compatible with gen2)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen2')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen25: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toBeNull();
+    });
+
+    it('warns for gen1.5 boxes (not compatible with NEO Latte machine)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-ADAPT-8', 'gen1.5')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen25: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/NEO Latte/i);
+    });
+
+    it('warns for gen1 boxes (not compatible with NEO Latte machine)', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen25: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/Gen1 machines/i);
+    });
+  });
+
+  describe('gen2-5 capsule with non-Gen2.5 customers', () => {
+    it('warns gen1 customer that gen2-5 requires a NEO Latte machine', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-LATTE-MACCHIATO-12', 'gen2-5')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/NEO Latte.*Gen 2\.5/i);
+    });
+
+    it('warns gen2 customer that gen2-5 requires a NEO Latte machine', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-LATTE-MACCHIATO-12', 'gen2-5')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/NEO Latte.*Gen 2\.5/i);
     });
   });
 });
@@ -631,6 +715,54 @@ describe('buildCustomBoxAssignments', () => {
 
       // default box-content-count of 1, qty 5 → 5 slots
       expect(result.fieldValuesByLineItemId.get('box-1')?.boxCapsuleTotal).toBe(5);
+    });
+  });
+
+  describe('Gen2.5 (NEO Latte) box group — gen2-5 selections route to gen25 boxes', () => {
+    it('assigns gen2-5 selections to a gen25 box independently of gen1/neo boxes', () => {
+      const gen25Box = makeCustomBoxGen25LineItem('box-gen25', 50, '2024-01-01T00:00:00.000Z');
+      const gen25Sel = makePickAndMixSelection('sel-gen25', 'BOX-NEO-LATTE-MACCHIATO-PM', 2, 10, 'gen2-5');
+      const result = buildCustomBoxAssignments(makeCart([gen25Box, gen25Sel]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('sel-gen25')?.assignedBoxId).toBe('box-gen25');
+      expect(result.fieldValuesByLineItemId.get('box-gen25')?.boxCapsuleTotal).toBe(20); // 10 × 2
+    });
+
+    it('does not cross-assign gen2-5 selections to gen1 or neo boxes', () => {
+      const gen1Box = makeCustomBoxLineItem('box-gen1', 50, '2024-01-01T00:00:00.000Z');
+      const neoBox = {
+        ...makeCustomBoxLineItem('box-neo', 50, '2024-01-01T00:00:00.000Z'),
+        variant: {
+          id: 1,
+          sku: 'CUSTOM-BOX-NEO-50',
+          attributes: [
+            { name: 'capsule-limit', value: 50 },
+            { name: 'generation', value: { key: 'gen2', label: 'Gen2' } },
+          ],
+        },
+      } as unknown as LineItem;
+      const gen25Sel = makePickAndMixSelection('sel-gen25', 'BOX-NEO-LATTE-MACCHIATO-PM', 2, 5, 'gen2-5');
+      const result = buildCustomBoxAssignments(makeCart([gen1Box, neoBox, gen25Sel]));
+
+      // No gen25 box → empty result (addBoxAction is null because no firstBox for the group)
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.has('sel-gen25')).toBe(false);
+    });
+
+    it('handles mixed gen1, neo, and gen25 selections correctly in one cart', () => {
+      const gen1Box = makeCustomBoxLineItem('box-gen1', 50, '2024-01-01T00:00:00.000Z');
+      const gen25Box = makeCustomBoxGen25LineItem('box-gen25', 50, '2024-01-01T00:00:00.000Z');
+      const gen1Sel = makePickAndMixSelection('sel-gen1', 'BOX-GEN1-ESPRESSO-MILANO-16', 1, 10, 'gen1');
+      const gen25Sel = makePickAndMixSelection('sel-gen25', 'BOX-NEO-LATTE-MACCHIATO-PM', 2, 5, 'gen2-5');
+
+      const result = buildCustomBoxAssignments(makeCart([gen1Box, gen25Box, gen1Sel, gen25Sel]));
+
+      expect(result.addBoxAction).toBeNull();
+      expect(result.fieldValuesByLineItemId.get('sel-gen1')?.assignedBoxId).toBe('box-gen1');
+      expect(result.fieldValuesByLineItemId.get('sel-gen25')?.assignedBoxId).toBe('box-gen25');
+      expect(result.fieldValuesByLineItemId.get('box-gen1')?.boxCapsuleTotal).toBe(10);
+      expect(result.fieldValuesByLineItemId.get('box-gen25')?.boxCapsuleTotal).toBe(10); // 5 × 2
     });
   });
 });

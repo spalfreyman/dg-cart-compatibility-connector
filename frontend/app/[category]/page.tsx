@@ -23,6 +23,10 @@ async function getCustomerCompatibleGens(customerId: string | undefined): Promis
       gens.add('gen2');
       gens.add('gen1.5');
     }
+    if (fields['is-gen2-latte'] === true) {
+      gens.add('gen2-5');
+      gens.add('gen2'); // gen2.5 machines support gen2 capsules
+    }
     return gens;
   } catch {
     return new Set();
@@ -63,10 +67,17 @@ export default async function CategoryPage({ params }: Props) {
     getCustomerId(),
   ]);
 
-  // Only show BOX products (priced variants only — filters out BEV/POD catalog refs)
+  // Only show retail box products: must have box-type=mono and a priced variant.
+  // This excludes POD/BEV/MACH catalog items and pick-and-mix selections (box-type=pick-and-mix).
   const products = allProducts.filter((p) => {
     const allVariants = [p.masterVariant, ...(p.variants ?? [])];
-    return allVariants.some((v) => (v.prices?.[0]?.value.centAmount ?? 0) > 0);
+    const hasMonoBox = allVariants.some((v) =>
+      v.attributes?.some(
+        (a) => a.name === 'box-type' && (a.value as { key?: string })?.key === 'mono'
+      )
+    );
+    const hasPricedVariant = allVariants.some((v) => (v.prices?.[0]?.value.centAmount ?? 0) > 0);
+    return hasMonoBox && hasPricedVariant;
   });
 
   // Only evaluate compatibility when logged in

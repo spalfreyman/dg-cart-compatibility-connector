@@ -3,7 +3,7 @@ import Image from 'next/image';
 import { useEffect, useState, useCallback } from 'react';
 import { formatPrice } from '@/app/lib/format-price';
 import { useCartStore } from '@/app/store/use-cart-store';
-import { CAPSULE_LIMIT, PICK_AND_MIX_BOX_SKU, PICK_AND_MIX_BOX_NEO_SKU } from '@/app/lib/constants';
+import { CAPSULE_LIMIT, PICK_AND_MIX_BOX_SKU, PICK_AND_MIX_BOX_NEO_SKU, PICK_AND_MIX_BOX_GEN25_SKU } from '@/app/lib/constants';
 import type { ProductProjection, ProductVariant } from '@commercetools/platform-sdk';
 
 interface BeverageSelection {
@@ -13,7 +13,7 @@ interface BeverageSelection {
   name: string;
   price: number;
   currency: string;
-  generation: 'gen1' | 'gen2' | 'gen1.5';
+  generation: 'gen1' | 'gen2' | 'gen1.5' | 'gen2-5';
   imageUrl: string | null;
 }
 
@@ -207,11 +207,19 @@ export default function PickAndMixPage() {
     return gen === 'gen2' || gen === 'gen1.5';
   });
 
+  const gen25Products = products.filter((p) => {
+    const gen = (getAttr(p.masterVariant, 'generation') as { key?: string } | undefined)?.key;
+    return gen === 'gen2-5';
+  });
+
   const gen1Selections = Array.from(selections.values()).filter(
     (s) => s.generation === 'gen1'
   );
   const neoSelections = Array.from(selections.values()).filter(
     (s) => s.generation === 'gen2' || s.generation === 'gen1.5'
+  );
+  const gen25Selections = Array.from(selections.values()).filter(
+    (s) => s.generation === 'gen2-5'
   );
 
   const gen1CapsulesUsed = gen1Selections.reduce(
@@ -219,6 +227,10 @@ export default function PickAndMixPage() {
     0
   );
   const neoCapsulesUsed = neoSelections.reduce(
+    (sum, s) => sum + s.quantity * s.capsulesPerServing,
+    0
+  );
+  const gen25CapsulesUsed = gen25Selections.reduce(
     (sum, s) => sum + s.quantity * s.capsulesPerServing,
     0
   );
@@ -232,7 +244,9 @@ export default function PickAndMixPage() {
       (getAttr(variant, 'generation') as { key?: string } | undefined)?.key ?? 'gen1'
     ) as BeverageSelection['generation'];
     const capsulesUsed =
-      generation === 'gen1' ? gen1CapsulesUsed : neoCapsulesUsed;
+      generation === 'gen1' ? gen1CapsulesUsed
+      : generation === 'gen2-5' ? gen25CapsulesUsed
+      : neoCapsulesUsed;
     const name =
       product.name['en-GB'] ??
       product.name['en-US'] ??
@@ -273,7 +287,8 @@ export default function PickAndMixPage() {
   async function addAllToCart() {
     const hasGen1 = gen1Selections.length > 0;
     const hasNeo = neoSelections.length > 0;
-    if (!hasGen1 && !hasNeo) return;
+    const hasGen25 = gen25Selections.length > 0;
+    if (!hasGen1 && !hasNeo && !hasGen25) return;
 
     setAddingToCart(true);
     try {
@@ -305,12 +320,28 @@ export default function PickAndMixPage() {
           });
         }
       }
+      if (hasGen25) {
+        await fetch('/api/cart/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sku: PICK_AND_MIX_BOX_GEN25_SKU, quantity: 1 }),
+        });
+        for (const sel of gen25Selections) {
+          await fetch('/api/cart/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sku: sel.sku, quantity: sel.quantity }),
+          });
+        }
+      }
 
       const totalQty =
         (hasGen1 ? 1 : 0) +
         gen1Selections.reduce((s, sel) => s + sel.quantity, 0) +
         (hasNeo ? 1 : 0) +
-        neoSelections.reduce((s, sel) => s + sel.quantity, 0);
+        neoSelections.reduce((s, sel) => s + sel.quantity, 0) +
+        (hasGen25 ? 1 : 0) +
+        gen25Selections.reduce((s, sel) => s + sel.quantity, 0);
 
       incrementCart(totalQty);
       setSelections(new Map());
@@ -341,7 +372,7 @@ export default function PickAndMixPage() {
     }
   }
 
-  const hasAnySelection = gen1Selections.length > 0 || neoSelections.length > 0;
+  const hasAnySelection = gen1Selections.length > 0 || neoSelections.length > 0 || gen25Selections.length > 0;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -407,7 +438,33 @@ export default function PickAndMixPage() {
                 </section>
               )}
 
-              {gen1Products.length === 0 && neoProducts.length === 0 && (
+              {/* NEO Latte (Gen 2.5) section */}
+              {gen25Products.length > 0 && (
+                <section>
+                  <div className="flex items-center gap-3 mb-4">
+                    <h2 className="text-xl font-bold text-gray-800">NEO Latte</h2>
+                    <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">
+                      Gen 2.5 Machine
+                    </span>
+                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                      {gen25CapsulesUsed}/{CAPSULE_LIMIT} capsules
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {gen25Products.map((product) => (
+                      <BeverageCard
+                        key={product.id}
+                        product={product}
+                        selection={selections.get(product.masterVariant.sku!)}
+                        capsulesLeft={CAPSULE_LIMIT - gen25CapsulesUsed}
+                        onAdjust={(delta) => adjustQuantity(product, delta)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {gen1Products.length === 0 && neoProducts.length === 0 && gen25Products.length === 0 && (
                 <p className="text-gray-500">No Pick &amp; Mix beverages found.</p>
               )}
             </div>
@@ -439,6 +496,14 @@ export default function PickAndMixPage() {
                     capsulesUsed={neoCapsulesUsed}
                     selections={neoSelections}
                     boxSkuLabel="CUSTOM-BOX-NEO-50"
+                  />
+                )}
+                {gen25Selections.length > 0 && (
+                  <BoxSummary
+                    label="NEO Latte Box"
+                    capsulesUsed={gen25CapsulesUsed}
+                    selections={gen25Selections}
+                    boxSkuLabel="CUSTOM-BOX-GEN25-50"
                   />
                 )}
               </div>
