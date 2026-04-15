@@ -20,6 +20,7 @@ export const CATEGORIES: Record<string, string> = {
   'gen1-starbucks': 'Starbucks',
   'neo-espresso': 'NEO Espresso',
   'neo-lungo': 'NEO Lungo',
+  'neo-latte': 'NEO Latte',
 };
 
 // Cookie names
