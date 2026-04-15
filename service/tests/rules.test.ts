@@ -3,11 +3,13 @@ import { checkCompatibility, buildCustomBoxAssignments } from '../src/rules';
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-function makeLineItem(
-  sku: string,
-  generationKey: string = 'gen2',
-  adapterCompatible: boolean = true
-): LineItem {
+const NEO_ADAPTER_SKU = 'neo-adapter';
+
+/**
+ * Makes a capsule box line item (has box-type="mono" + generation).
+ * These are the items checkCompatibility evaluates.
+ */
+function makeBoxItem(sku: string, generationKey: string = 'gen2'): LineItem {
   return {
     id: `li-${sku}`,
     productId: `prod-${sku}`,
@@ -17,11 +19,9 @@ function makeLineItem(
       id: 1,
       sku,
       attributes: [
-        {
-          name: 'generation',
-          value: { key: generationKey, label: generationKey },
-        },
-        { name: 'adapter-compatible', value: adapterCompatible },
+        { name: 'generation', value: { key: generationKey, label: generationKey } },
+        { name: 'box-type', value: { key: 'mono', label: 'Mono-beverage' } },
+        { name: 'serving-count', value: 8 },
       ],
     },
     price: {
@@ -40,15 +40,62 @@ function makeLineItem(
   } as unknown as LineItem;
 }
 
+/** Machine — no box-type/capsule-limit so it is NOT evaluated by checkCompatibility. */
 function makeNeoMachine(): LineItem {
-  return makeLineItem('MACH-NEO-BLACK-220V', 'gen2', false);
+  return {
+    id: 'li-MACH-NEO',
+    productId: 'prod-MACH-NEO',
+    productType: { typeId: 'product-type', id: 'pt-machine' },
+    name: { 'en-US': 'NEO Machine' },
+    variant: {
+      id: 1,
+      sku: 'MACH-NEO-BLACK-220V',
+      attributes: [{ name: 'generation', value: { key: 'gen2', label: 'Gen2' } }],
+    },
+    price: {
+      id: 'price-m',
+      value: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 9999, fractionDigits: 2 },
+    },
+    quantity: 1,
+    discountedPricePerQuantity: [],
+    perMethodTaxRate: [],
+    addedAt: '2024-01-01T00:00:00.000Z',
+    lastModifiedAt: '2024-01-01T00:00:00.000Z',
+    state: [],
+    priceMode: 'Platform',
+    lineItemMode: 'Standard',
+    totalPrice: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 9999, fractionDigits: 2 },
+  } as unknown as LineItem;
 }
 
+/** Neo Adapter accessory — no box-type/capsule-limit, so skipped by checkCompatibility.
+ *  Its presence in the cart grants gen1.5 compatibility to gen1 customers. */
 function makeNeoAdapter(): LineItem {
-  return makeLineItem(NEO_ADAPTER_SKU, 'gen1', false);
+  return {
+    id: `li-${NEO_ADAPTER_SKU}`,
+    productId: `prod-${NEO_ADAPTER_SKU}`,
+    productType: { typeId: 'product-type', id: 'pt-acc' },
+    name: { 'en-US': 'Neo Adapter' },
+    variant: {
+      id: 1,
+      sku: NEO_ADAPTER_SKU,
+      attributes: [{ name: 'generation', value: { key: 'gen1', label: 'Gen1' } }],
+    },
+    price: {
+      id: 'price-a',
+      value: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 1999, fractionDigits: 2 },
+    },
+    quantity: 1,
+    discountedPricePerQuantity: [],
+    perMethodTaxRate: [],
+    addedAt: '2024-01-01T00:00:00.000Z',
+    lastModifiedAt: '2024-01-01T00:00:00.000Z',
+    state: [],
+    priceMode: 'Platform',
+    lineItemMode: 'Standard',
+    totalPrice: { type: 'centPrecision', currencyCode: 'EUR', centAmount: 1999, fractionDigits: 2 },
+  } as unknown as LineItem;
 }
-
-const NEO_ADAPTER_SKU = 'neo-adapter';
 
 function makeCart(lineItems: LineItem[] = []): Cart {
   return {
@@ -173,103 +220,159 @@ function makePickAndMixSelection(
 }
 
 // ─── checkCompatibility tests ─────────────────────────────────────────────────
+//
+// Compatibility rules:
+//   is-gen1 = true                      → can buy generation=gen1
+//   is-gen2 = true                      → can buy generation=gen2
+//   is-gen1 = true + has-neo-adapter    → can also buy generation=gen1.5
+//
+// Only items with box-type or capsule-limit attributes are evaluated.
+// Machines and adapters in the cart are ignored as capsule items.
 
 describe('checkCompatibility', () => {
-  describe('no NEO products in cart', () => {
-    it('returns no entries for a cart with only Gen1 products', () => {
-      const cart = makeCart([makeLineItem('BOX-GEN1-ESPRESSO-10', 'gen1', false)]);
-      expect(checkCompatibility(cart, makeCustomer({ isGen1: true }))).toEqual([]);
+  describe('no capsule items in cart', () => {
+    it('returns [] for an empty cart', () => {
+      expect(checkCompatibility(makeCart(), null)).toEqual([]);
     });
 
-    it('returns no entries for an empty cart', () => {
-      expect(checkCompatibility(makeCart(), null)).toEqual([]);
+    it('returns [] when cart contains only a machine (no box-type/capsule-limit)', () => {
+      const cart = makeCart([makeNeoMachine()]);
+      expect(checkCompatibility(cart, makeCustomer({ isGen2: true }))).toEqual([]);
+    });
+
+    it('returns [] when cart contains only the Neo Adapter accessory', () => {
+      const cart = makeCart([makeNeoAdapter()]);
+      expect(checkCompatibility(cart, makeCustomer({ isGen1: true }))).toEqual([]);
     });
   });
 
-  describe('Gen2 customer', () => {
-    it('returns compatible (null warning) for NEO products', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-ESPRESSO-8')]);
-      const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
+  describe('Gen1 customer — compatible with gen1 only', () => {
+    it('returns warning=null for gen1 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
       expect(result).toHaveLength(1);
       expect(result[0].warning).toBeNull();
     });
-  });
 
-  describe('NEO machine in cart resolves compatibility', () => {
-    it('returns compatible (null warning) for all NEO items when NEO machine is in cart', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-ESPRESSO-8'), makeNeoMachine()]);
-      const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
-      expect(result.every((r) => r.warning === null)).toBe(true);
-    });
-  });
-
-  describe('Gen1 customer, no adapter', () => {
-    it('warns on all NEO line items', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-ESPRESSO-8')]);
+    it('warns for gen1.5 boxes (requires Neo Adapter)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
       expect(result).toHaveLength(1);
-      expect(result[0].warning).toMatch(/compatible machine/i);
       expect(result[0].warning).toMatch(/Neo Adapter/i);
+    });
+
+    it('warns for gen2 boxes (requires NEO machine)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen2')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/NEO machine/i);
     });
   });
 
   describe('Gen1 customer with Neo Adapter on profile', () => {
-    it('returns compatible (null warning) for adapter-compatible pods', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-ESPRESSO-8', 'gen2', true)]);
+    it('returns warning=null for gen1 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true, hasAdapter: true }));
       expect(result).toHaveLength(1);
       expect(result[0].warning).toBeNull();
     });
 
-    it('warns for non-adapter-compatible pods (e.g. NEO Americano)', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-AMERICANO-8', 'gen2', false)]);
+    it('returns warning=null for gen1.5 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5')]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true, hasAdapter: true }));
       expect(result).toHaveLength(1);
-      expect(result[0].warning).toMatch(/NEO machine is required/i);
+      expect(result[0].warning).toBeNull();
     });
 
-    it('returns per-item results when adapter-OK and blocked pods are mixed in cart', () => {
+    it('still warns for gen2 boxes (NEO machine required, adapter does not cover gen2)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-RISTRETTO-8', 'gen2')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen1: true, hasAdapter: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/NEO machine/i);
+    });
+
+    it('returns correct per-item results for a mixed gen1 + gen1.5 + gen2 cart', () => {
       const cart = makeCart([
-        makeLineItem('BOX-NEO-ESPRESSO-8', 'gen2', true),
-        makeLineItem('BOX-NEO-AMERICANO-8', 'gen2', false),
+        makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1'),
+        makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5'),
+        makeBoxItem('BOX-NEO-RISTRETTO-8', 'gen2'),
       ]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true, hasAdapter: true }));
-      expect(result).toHaveLength(2);
-      const espresso = result.find((r) => r.lineItemId === 'li-BOX-NEO-ESPRESSO-8');
-      const americano = result.find((r) => r.lineItemId === 'li-BOX-NEO-AMERICANO-8');
-      expect(espresso?.warning).toBeNull();
-      expect(americano?.warning).toMatch(/NEO machine is required/i);
+      expect(result).toHaveLength(3);
+      expect(result.find((r) => r.lineItemId === 'li-BOX-GEN1-ESPRESSO-10')?.warning).toBeNull();
+      expect(result.find((r) => r.lineItemId === 'li-BOX-NEO-ESPRESSO-8')?.warning).toBeNull();
+      expect(result.find((r) => r.lineItemId === 'li-BOX-NEO-RISTRETTO-8')?.warning).toMatch(/NEO machine/i);
     });
   });
 
-  describe('Neo Adapter in cart resolves partial compatibility', () => {
-    it('returns compatible (null warning) for adapter-compatible pods when adapter is in cart', () => {
+  describe('Neo Adapter in cart grants gen1.5 compatibility', () => {
+    it('returns warning=null for gen1.5 boxes when adapter is in cart (no adapter on profile)', () => {
       const cart = makeCart([
-        makeLineItem('BOX-NEO-ESPRESSO-8', 'gen2', true),
+        makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5'),
         makeNeoAdapter(),
       ]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
-      expect(result).toHaveLength(1); // adapter is gen1, not counted as NEO product
+      // adapter is not a capsule item → only the espresso box is checked
+      expect(result).toHaveLength(1);
       expect(result[0].warning).toBeNull();
     });
 
-    it('still warns for non-adapter-compatible pods even when adapter is in cart', () => {
+    it('still warns for gen2 boxes even when adapter is in cart', () => {
       const cart = makeCart([
-        makeLineItem('BOX-NEO-AMERICANO-8', 'gen2', false),
+        makeBoxItem('BOX-NEO-RISTRETTO-8', 'gen2'),
         makeNeoAdapter(),
       ]);
       const result = checkCompatibility(cart, makeCustomer({ isGen1: true }));
       expect(result).toHaveLength(1);
-      expect(result[0].warning).toMatch(/NEO machine is required/i);
+      expect(result[0].warning).toMatch(/NEO machine/i);
+    });
+  });
+
+  describe('Gen2 customer — compatible with gen2 only', () => {
+    it('returns warning=null for gen2 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen2')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toBeNull();
+    });
+
+    it('warns for gen1 boxes (not compatible with NEO machine)', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/Gen1 machines/i);
+    });
+
+    it('warns for gen1.5 boxes (not compatible with NEO machine)', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen1.5')]);
+      const result = checkCompatibility(cart, makeCustomer({ isGen2: true }));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/Neo Adapter/i);
     });
   });
 
   describe('anonymous / no customer', () => {
-    it('warns to sign in for all NEO line items', () => {
-      const cart = makeCart([makeLineItem('BOX-NEO-ESPRESSO-8')]);
+    it('warns to sign in for gen1 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
       const result = checkCompatibility(cart, null);
       expect(result).toHaveLength(1);
       expect(result[0].warning).toMatch(/sign in/i);
+    });
+
+    it('warns to sign in for gen2 boxes', () => {
+      const cart = makeCart([makeBoxItem('BOX-NEO-ESPRESSO-8', 'gen2')]);
+      const result = checkCompatibility(cart, null);
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/sign in/i);
+    });
+  });
+
+  describe('logged-in customer with no machine profile', () => {
+    it('warns about missing machine for any box', () => {
+      const cart = makeCart([makeBoxItem('BOX-GEN1-ESPRESSO-10', 'gen1')]);
+      const result = checkCompatibility(cart, makeCustomer({}));
+      expect(result).toHaveLength(1);
+      expect(result[0].warning).toMatch(/No compatible machine/i);
     });
   });
 });

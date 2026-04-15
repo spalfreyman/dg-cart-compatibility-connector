@@ -1,6 +1,5 @@
 import type { Cart, Customer, LineItem } from '@commercetools/platform-sdk';
 
-const NEO_MACHINE_SKU_PREFIX = 'MACH-NEO-';
 const NEO_ADAPTER_SKU = 'neo-adapter';
 
 // ─── Custom type / field name constants ──────────────────────────────────────
@@ -36,25 +35,28 @@ function getAttr(
   return attributes.find((a) => a.name === name)?.value;
 }
 
-// ─── NEO compatibility helpers ────────────────────────────────────────────────
+// ─── Compatibility helpers ────────────────────────────────────────────────────
 
-function isNeoProduct(lineItem: LineItem): boolean {
-  const attrs = lineItem.variant?.attributes ?? [];
-  const generation = getAttr(attrs, 'generation') as
+/**
+ * Returns the generation key ('gen1', 'gen1.5', 'gen2') from a line item, or null.
+ */
+function getGeneration(lineItem: LineItem): string | null {
+  const gen = getAttr(lineItem.variant?.attributes ?? [], 'generation') as
     | { key: string }
     | undefined;
-  return generation?.key === 'gen2';
+  return gen?.key ?? null;
 }
 
-function isAdapterCompatible(lineItem: LineItem): boolean {
+/**
+ * Returns true for items that need compatibility checking — capsule boxes
+ * (have box-type or capsule-limit attribute) with a generation assigned.
+ * Machines, adapters, and untyped products are excluded.
+ */
+function isCapsuleItem(lineItem: LineItem): boolean {
   const attrs = lineItem.variant?.attributes ?? [];
-  return getAttr(attrs, 'adapter-compatible') === true;
-}
-
-function cartHasNeoMachine(lineItems: LineItem[]): boolean {
-  return lineItems.some((li) =>
-    (li.variant?.sku ?? '').startsWith(NEO_MACHINE_SKU_PREFIX)
-  );
+  const hasBoxType = attrs.some((a) => a.name === 'box-type');
+  const hasCapsuleLimit = attrs.some((a) => a.name === 'capsule-limit');
+  return (hasBoxType || hasCapsuleLimit) && getGeneration(lineItem) !== null;
 }
 
 function cartHasNeoAdapter(lineItems: LineItem[]): boolean {
@@ -110,61 +112,91 @@ export function getTopThreeProductIds(customer: Customer | null): Set<string> {
   return new Set(refs.map((ref) => ref.id));
 }
 
-// ─── Exported: NEO compatibility check ───────────────────────────────────────
+// ─── Exported: Compatibility check ───────────────────────────────────────────
 
 /**
- * Evaluate per-line-item compatibility against the customer profile.
- * Returns one entry per NEO line item — warning=null means compatible (clears any stale warning).
- * Returns [] if cart has no NEO products.
+ * Compatibility rules (per customer machine profile):
+ *   is-gen1 = true                         → can buy generation=gen1
+ *   is-gen2 = true                         → can buy generation=gen2
+ *   is-gen1 = true  +  has-neo-adapter     → can also buy generation=gen1.5
+ *
+ * Returns one entry per capsule line item (box-type or capsule-limit present).
+ * warning=null means compatible and clears any stale warning.
+ * Returns [] if the cart contains no capsule items.
  */
 export function checkCompatibility(
   cart: Cart,
   customer: Customer | null
 ): LineItemWarning[] {
   const lineItems = cart.lineItems ?? [];
-  const neoItems = lineItems.filter(isNeoProduct);
+  const capsuleItems = lineItems.filter(isCapsuleItem);
 
-  if (neoItems.length === 0) return [];
-
-  if (cartHasNeoMachine(lineItems)) {
-    return neoItems.map((li) => ({ lineItemId: li.id, warning: null }));
-  }
+  if (capsuleItems.length === 0) return [];
 
   const fields = (customer?.custom?.fields ?? {}) as Record<string, unknown>;
-  const isGen2 = fields['is-gen2'] === true;
   const isGen1 = fields['is-gen1'] === true;
+  const isGen2 = fields['is-gen2'] === true;
   const profileHasAdapter = fields['has-neo-adapter'] === true;
   const adapterInCart = cartHasNeoAdapter(lineItems);
-
-  if (isGen2) {
-    return neoItems.map((li) => ({ lineItemId: li.id, warning: null }));
-  }
-
-  if (!isGen1) {
-    return neoItems.map((li) => ({
-      lineItemId: li.id,
-      warning:
-        "You don't have a compatible machine for this product. " +
-        'Please sign in to verify your machine compatibility.',
-    }));
-  }
-
   const hasAdapter = profileHasAdapter || adapterInCart;
 
-  if (!hasAdapter) {
-    return neoItems.map((li) => ({
-      lineItemId: li.id,
-      warning:
-        "You don't have a compatible machine. NEO capsules require a NEO machine or the Neo Adapter accessory.",
-    }));
+  // Build the set of compatible generation keys for this customer
+  const compatible = new Set<string>();
+  if (isGen1) {
+    compatible.add('gen1');
+    if (hasAdapter) compatible.add('gen1.5');
   }
+  if (isGen2) compatible.add('gen2');
 
-  return neoItems.map((li) => ({
-    lineItemId: li.id,
-    warning: isAdapterCompatible(li)
-      ? null
-      : `${getItemName(li)} cannot be used with the Neo Adapter on a Gen1 machine. A NEO machine is required.`,
-  }));
+  return capsuleItems.map((li) => {
+    const gen = getGeneration(li)!;
+    const name = getItemName(li);
+
+    // Anonymous — cannot verify machine
+    if (!customer) {
+      return {
+        lineItemId: li.id,
+        warning:
+          "You don't have a compatible machine for this product. " +
+          'Please sign in to verify your machine compatibility.',
+      };
+    }
+
+    // Logged in but no machine on profile
+    if (compatible.size === 0) {
+      return {
+        lineItemId: li.id,
+        warning:
+          'No compatible machine found on your account. Please update your machine profile.',
+      };
+    }
+
+    // Compatible — clear any stale warning
+    if (compatible.has(gen)) {
+      return { lineItemId: li.id, warning: null };
+    }
+
+    // Incompatible — specific messages per generation mismatch
+    if (gen === 'gen2') {
+      return {
+        lineItemId: li.id,
+        warning: `${name} requires a NEO machine and is not compatible with your Gen1 machine.`,
+      };
+    }
+
+    if (gen === 'gen1.5') {
+      return {
+        lineItemId: li.id,
+        warning: `${name} requires the Neo Adapter accessory on a Gen1 machine.`,
+      };
+    }
+
+    // gen1 product, gen2 customer
+    return {
+      lineItemId: li.id,
+      warning: `${name} is designed for Gen1 machines and is not compatible with your NEO machine.`,
+    };
+  });
 }
 
 // ─── Exported: Custom box assignment ─────────────────────────────────────────
