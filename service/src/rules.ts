@@ -345,23 +345,16 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   if (allSelections.length === 0) return emptyResult;
 
   // Split by generation group:
-  //   gen1  — classic capsules (null-generation items default here)
-  //   neo   — gen2 and gen1.5 capsules (NEO machine / NEO machine + adapter)
-  //   gen25 — gen2-5 capsules (NEO Latte / Gen 2.5 machine only)
-  const isNeoGen = (gen: string | null) => gen === 'gen2' || gen === 'gen1.5';
-  const isGen25Gen = (gen: string | null) => gen === 'gen2-5';
+  //   gen1 — classic capsules (null-generation items default here)
+  //   neo  — gen2, gen1.5, and gen2-5 all share one NEO box
+  const isNeoGen = (gen: string | null) =>
+    gen === 'gen2' || gen === 'gen1.5' || gen === 'gen2-5';
 
-  const gen1Boxes = allCustomBoxes.filter(
-    (b) => !isNeoGen(getGeneration(b)) && !isGen25Gen(getGeneration(b))
-  );
+  const gen1Boxes = allCustomBoxes.filter((b) => !isNeoGen(getGeneration(b)));
   const neoBoxes = allCustomBoxes.filter((b) => isNeoGen(getGeneration(b)));
-  const gen25Boxes = allCustomBoxes.filter((b) => isGen25Gen(getGeneration(b)));
 
-  const gen1Selections = allSelections.filter(
-    (s) => !isNeoGen(getGeneration(s)) && !isGen25Gen(getGeneration(s))
-  );
+  const gen1Selections = allSelections.filter((s) => !isNeoGen(getGeneration(s)));
   const neoSelections = allSelections.filter((s) => isNeoGen(getGeneration(s)));
-  const gen25Selections = allSelections.filter((s) => isGen25Gen(getGeneration(s)));
 
   // Process each generation group; return immediately if a new box is needed
   const gen1Result = assignGroupToBoxes(gen1Boxes, gen1Selections, lineItems);
@@ -370,14 +363,10 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   const neoResult = assignGroupToBoxes(neoBoxes, neoSelections, lineItems);
   if (neoResult.addBoxAction) return neoResult;
 
-  const gen25Result = assignGroupToBoxes(gen25Boxes, gen25Selections, lineItems);
-  if (gen25Result.addBoxAction) return gen25Result;
-
-  // Merge field-value maps from all groups
+  // Merge field-value maps from both groups
   const merged = new Map<string, CustomBoxFieldValues>([
     ...gen1Result.fieldValuesByLineItemId,
     ...neoResult.fieldValuesByLineItemId,
-    ...gen25Result.fieldValuesByLineItemId,
   ]);
   return { fieldValuesByLineItemId: merged, addBoxAction: null };
 }

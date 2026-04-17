@@ -311,20 +311,15 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
 
   if (allSelections.length === 0) return emptyResult;
 
-  const isNeoGen = (gen: string | null) => gen === 'gen2' || gen === 'gen1.5';
-  const isGen25Gen = (gen: string | null) => gen === 'gen2-5';
+  // gen2, gen1.5, and gen2-5 all share one NEO box
+  const isNeoGen = (gen: string | null) =>
+    gen === 'gen2' || gen === 'gen1.5' || gen === 'gen2-5';
 
-  const gen1Boxes = allCustomBoxes.filter(
-    (b) => !isNeoGen(getGeneration(b)) && !isGen25Gen(getGeneration(b))
-  );
+  const gen1Boxes = allCustomBoxes.filter((b) => !isNeoGen(getGeneration(b)));
   const neoBoxes = allCustomBoxes.filter((b) => isNeoGen(getGeneration(b)));
-  const gen25Boxes = allCustomBoxes.filter((b) => isGen25Gen(getGeneration(b)));
 
-  const gen1Selections = allSelections.filter(
-    (s) => !isNeoGen(getGeneration(s)) && !isGen25Gen(getGeneration(s))
-  );
+  const gen1Selections = allSelections.filter((s) => !isNeoGen(getGeneration(s)));
   const neoSelections = allSelections.filter((s) => isNeoGen(getGeneration(s)));
-  const gen25Selections = allSelections.filter((s) => isGen25Gen(getGeneration(s)));
 
   const gen1Result = assignGroupToBoxes(gen1Boxes, gen1Selections, lineItems);
   if (gen1Result.addBoxAction) return gen1Result;
@@ -332,12 +327,8 @@ export function buildCustomBoxAssignments(cart: Cart): CustomBoxResult {
   const neoResult = assignGroupToBoxes(neoBoxes, neoSelections, lineItems);
   if (neoResult.addBoxAction) return neoResult;
 
-  const gen25Result = assignGroupToBoxes(gen25Boxes, gen25Selections, lineItems);
-  if (gen25Result.addBoxAction) return gen25Result;
-
   const merged = new Map<string, CustomBoxFieldValues>();
   gen1Result.fieldValuesByLineItemId.forEach((v, k) => merged.set(k, v));
   neoResult.fieldValuesByLineItemId.forEach((v, k) => merged.set(k, v));
-  gen25Result.fieldValuesByLineItemId.forEach((v, k) => merged.set(k, v));
   return { fieldValuesByLineItemId: merged, addBoxAction: null };
 }
